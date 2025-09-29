@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength - Spiel (Fix Winkel/Drag)</title>
+<title>Wavelength - Spiel (Fix gespiegelt)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -241,7 +241,7 @@ function drawTargetSegmentsInside(ctx, centerAngle){
   wedge(centerAngle,   0.9, '#ef4444', '5');
 }
 
-// arrow drawing
+// ---------- drawArrow (keine Änderung nötig hier; kept for clarity) ----------
 function drawArrow(ctx, angle, color, label, highlighted=false){
   const m = metrics(ctx);
   const ang = Math.PI - (angle * Math.PI/180);
@@ -255,7 +255,8 @@ function drawArrow(ctx, angle, color, label, highlighted=false){
   ctx.fillStyle = rgba(color,1); ctx.fill();
   if(highlighted){ ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.stroke(); }
   const lx = m.cx + (m.r-56)*Math.cos(ang), ly = m.cy + (m.r-56)*Math.sin(ang);
-  ctx.fillStyle = '#000'; ctx.font = highlighted ? 'bold 13px sans-serif' : '12px sans-serif'; ctx.fillText(label, lx + 10, ly + 4);
+  ctx.fillStyle = '#000'; ctx.font = highlighted ? 'bold 13px sans-serif' : '12px sans-serif';
+  ctx.fillText(label, lx + 10, ly + 4);
 }
 
 // ---------- Render functions ----------
@@ -311,22 +312,29 @@ function renderPlayerList(){
   });
 }
 
-// ---------- Pointer -> Winkel (Korrektur) ----------
+// ---------- canvasToAngle (gespiegelt über X-Achse) ----------
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
-  const x = clientX - rect.left, y = clientY - rect.top;
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
   const m = metrics(ctx);
-  // compute raw angle using atan2(y - cy, x - cx)
-  const dx = x - m.cx, dy = y - m.cy;
-  const deg = Math.atan2(dy, dx) * 180 / Math.PI; // -180 .. 180
-  // normalize: left = 0, top = 90, right = 180
-  const angleDeg = (deg + 180 + 360) % 360; // make positive
-  if(angleDeg < 0 || angleDeg > 360) return null;
-  // accept only 0..180 (upper semicircle)
+
+  // Spiegelung über x-Achse: dy = cy - y (nicht y - cy)
+  const dx = x - m.cx;
+  const dy = m.cy - y; // <-- gespiegelt
+
+  // Winkel in Grad (atan2 mit gespiegeltem dy)
+  let theta = Math.atan2(dy, dx); // -PI .. PI
+  let angleDeg = theta * 180 / Math.PI; // -180 .. 180
+  // Normalisiere auf 0..360
+  angleDeg = (angleDeg + 360) % 360;
+  // Akzeptiere nur obere Hälfte 0..180
   if(angleDeg < 0 || angleDeg > 180) return null;
-  // also check distance to center to be within reasonable arc (allow some tolerance)
-  const dist = Math.sqrt(dx*dx + dy*dy);
-  if(y > m.cy + 6 || dist > m.r + 6) return null;
+
+  // Distanzkontrolle (kein zu weiter Klick)
+  const dist = Math.sqrt((x - m.cx)*(x - m.cx) + (y - m.cy)*(y - m.cy));
+  if(dist > m.r + 6) return null;
+
   return Math.round(angleDeg);
 }
 
