@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength - Spiel (Winkel-Fix)</title>
+<title>Wavelength - Spiel (Fix: arccos-Winkel)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -185,7 +185,9 @@ function metrics(ctx){
   const w = ctx.canvas.width / dpi;
   const h = ctx.canvas.height / dpi;
   const cx = w/2;
-  const cy = h - 16; // center near bottom so semicircle opens upwards
+  // FEINJUSTIERUNG: cy steuert vertikale Lage des Bogens. Wenn es auf deinem Gerät
+  // zu weit unten/oben ist, passe hier +|- (z.B. use h-10 oder h-26).
+  const cy = h - 16; // <-- du kannst diesen Wert bei Bedarf anpassen
   const r = Math.min(w/2 - 20, h - 30);
   return {w,h,cx,cy,r};
 }
@@ -312,31 +314,43 @@ function renderPlayerList(){
   });
 }
 
-// ---------- canvasToAngle (korrekte Spiegelung über X-Achse) ----------
+// ---------- canvasToAngle (robuste arccos-Variante) ----------
+/* 
+   Idee: Winkel entlang des Bogens nur von der x-Position ableiten:
+   angleDeg = 180 - acos((x - cx) / r) * 180/PI
+   Das vermeidet Vertikal-Spiegelungen: 
+   - x = cx - r => angle = 0 (links)
+   - x = cx       => angle = 90 (oben)
+   - x = cx + r => angle = 180 (rechts)
+*/
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
   const m = metrics(ctx);
 
-  // Berechne Rohwinkel phi = atan2(cy - y, x - cx)
-  // phi: right=0, top=90, left=180 deg
-  const phi = Math.atan2(m.cy - y, x - m.cx); // radians
-  let phiDeg = phi * 180 / Math.PI; // -180 .. 180
-  // angleDeg so dass: left=0, top=90, right=180 => angleDeg = 180 - phiDeg
-  let angleDeg = 180 - phiDeg;
-  // normalisiere auf 0..360 und akzeptiere nur 0..180
-  angleDeg = (angleDeg + 360) % 360;
-  if(angleDeg < 0 || angleDeg > 180) return null;
+  // reject touches clearly below baseline
+  if(y > m.cy + 10) return null;
 
-  // Distanzkontrolle: nur wenn Pointer nahe genug an Bogen bzw. oberhalb Basislinie
+  // compute normalized x on circle (-1..1)
+  let nx = (x - m.cx) / m.r;
+  // clamp numerics
+  if(nx < -1) nx = -1;
+  if(nx > 1) nx = 1;
+
+  // compute arc angle via arccos (radians)
+  const arcRad = Math.acos(nx); // 0..PI
+  // map to 0..180 as desired: left->0, top->90, right->180
+  const angleDeg = 180 - (arcRad * 180 / Math.PI);
+
+  // safety: only accept if the pointer is roughly close to the arc (allow some slack)
   const dx = x - m.cx;
-  const dyReal = y - m.cy;
-  const dist = Math.sqrt(dx*dx + dyReal*dyReal);
-  if(y > m.cy + 8) return null;      // unterhalb Basislinie nicht erlaubt
-  if(dist > m.r + 12) return null;   // zu weit draußen nicht erlaubt
+  const dy = y - m.cy;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if(dist > m.r + 30) return null; // too far away
+  if(dist < m.r * 0.25) return null; // too close to center (optional)
 
-  return Math.round(angleDeg);
+  return Math.round(Math.max(0, Math.min(180, angleDeg)));
 }
 
 // ---------- Drag binding (arrow along arc) ----------
