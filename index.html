@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength - Spiel (Update)</title>
+<title>Wavelength - Spiel (5° Segmente & Pfeile außen→innen)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -254,12 +254,12 @@ function drawBase(ctx){
   ctx.lineWidth = 1.6; ctx.strokeStyle = '#c7cfe0'; ctx.stroke();
 }
 
-// Alle Keile jetzt gleich groß (halfDeg unified)
+// Alle Keile 5° breit => halfDeg = 2.5°
 function drawTargetSegmentsInside(ctx, centerAngle){
   const m = metrics(ctx);
   const outer = m.r - 6;
   const inner = Math.max(m.r - 96, m.r * 0.45);
-  const halfDeg = 2.2; // größerer Wert -> alle Keile gleich groß (entspricht gewünschter Größe)
+  const halfDeg = 2.5; // 2.5° -> voller Keil 5°
 
   function wedge(angleDeg, halfDegLocal, color, label){
     const centerRad = Math.PI + (angleDeg * Math.PI/180);
@@ -288,22 +288,37 @@ function drawTargetSegmentsInside(ctx, centerAngle){
   wedge(centerAngle,   halfDeg, '#ef4444', '5');
 }
 
-// draw player arrow
+// Pfeile zeigen nun VON AUSSEN NACH INNEN:
+// - Basis befindet sich außen (near outer radius)
+// - Spitze (tip) sitzt näher zur Mitte (inner radius)
 function drawArrow(ctx, angle, color, label, highlighted=false){
   const m = metrics(ctx);
   const ang = Math.PI + (angle * Math.PI/180);
-  const tipX = m.cx + (m.r-6)*Math.cos(ang), tipY = m.cy + (m.r-6)*Math.sin(ang);
-  const baseR = m.r - 48;
-  const baseX = m.cx + baseR*Math.cos(ang), baseY = m.cy + baseR*Math.sin(ang);
-  const ortX = Math.cos(ang - Math.PI/2), ortY = Math.sin(ang - Math.PI/2);
-  const half = highlighted ? 12 : 8;
-  const p1=[tipX,tipY], p2=[baseX+ortX*half, baseY+ortY*half], p3=[baseX-ortX*half, baseY-ortY*half];
-  ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.lineTo(p3[0],p3[1]); ctx.closePath();
-  ctx.fillStyle = rgba(color,1); ctx.fill();
+  const outerR = m.r - 6;      // Außen-Kante (Basis)
+  const innerR = Math.max(m.r - 92, m.r * 0.35); // Spitze näher an Mitte
+
+  // Spitze (tip) liegt am innerR (in Richtung Zentrum)
+  const tipX = m.cx + innerR * Math.cos(ang), tipY = m.cy + innerR * Math.sin(ang);
+  // Basispunkte liegen am outerR, seitlich versetzt
+  const baseLeftX  = m.cx + outerR * Math.cos(ang + 0.04);
+  const baseLeftY  = m.cy + outerR * Math.sin(ang + 0.04);
+  const baseRightX = m.cx + outerR * Math.cos(ang - 0.04);
+  const baseRightY = m.cy + outerR * Math.sin(ang - 0.04);
+
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(baseLeftX, baseLeftY);
+  ctx.lineTo(baseRightX, baseRightY);
+  ctx.closePath();
+  ctx.fillStyle = rgba(color,1);
+  ctx.fill();
   if(highlighted){ ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.stroke(); }
-  const lx = m.cx + (m.r-66)*Math.cos(ang), ly = m.cy + (m.r-66)*Math.sin(ang);
+
+  // Label aussen (rechts vom äußeren Rand)
+  const lx = m.cx + (outerR + 12) * Math.cos(ang);
+  const ly = m.cy + (outerR + 12) * Math.sin(ang);
   ctx.fillStyle = '#000'; ctx.font = highlighted ? 'bold 13px sans-serif' : '12px sans-serif';
-  ctx.fillText(label, lx + 10, ly + 4);
+  ctx.fillText(label, lx + 8, ly + 4);
 }
 
 // --------------- Render Master & Guess -----------------
@@ -441,12 +456,10 @@ el('confirmBtn').addEventListener('click', ()=>{
     const btn = document.createElement('button');
     btn.textContent = 'Ergebnis anzeigen (Spielmacher)';
     btn.addEventListener('click', ()=>{
-      // Use revealCanvasWrap size (visible) instead of hidden canvasGuess parent
       renderReveal(true);
       renderScores();
       btn.disabled = true;
       el('postRoundNotice').style.display = 'none';
-      // scroll into view for convenience
       el('revealCanvasWrap').scrollIntoView({behavior:'smooth', block:'center'});
     });
     ctrl.appendChild(btn);
@@ -485,13 +498,13 @@ el('masterDoneBtn').addEventListener('click', ()=>{
 function renderReveal(showTarget){
   const wrap = el('revealCanvasWrap');
   const w = wrap.clientWidth || Math.max(320, document.documentElement.clientWidth - 24);
-  const h = 260;
+  const h = 280;
   const c = document.createElement('canvas'); const dpi = window.devicePixelRatio || 1;
   c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi);
   c.style.width = w + 'px'; c.style.height = h + 'px';
   const ctx = c.getContext('2d'); ctx.setTransform(dpi,0,0,dpi,0,0);
   drawBase(ctx);
-  // draw all confirmed player arrows
+  // draw all confirmed player arrows (outer→inner)
   Object.entries(confirmedGuesses).forEach(([name,ang])=>{
     const p = players.find(pp=>pp.name === name);
     if(p) drawArrow(ctx, ang, p.color, name, false);
