@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength - Spiel (aktualisiert)</title>
+<title>Wavelength - Spiel (Update)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -15,7 +15,7 @@
   button.secondary{background:#4b5563}
   .small{font-size:0.9rem;color:#555}
   .row{display:flex;gap:8px;align-items:center}
-  .canvas-wrap{width:100%;height:320px;border-radius:8px;background:linear-gradient(180deg,#fff,#f3f4f6);touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .canvas-wrap{width:100%;height:360px;border-radius:8px;background:linear-gradient(180deg,#fff,#f3f4f6);touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
   canvas{max-width:100%;height:100%;border-radius:8px;display:block}
   .palette{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
   .pal-btn{width:36px;height:36px;border-radius:6px;border:2px solid transparent;cursor:pointer}
@@ -94,7 +94,7 @@
       <h3>Ergebnis</h3>
       <div id="postRoundNotice" class="notice" style="display:none"></div>
       <div style="margin-top:8px" id="postRoundControls"></div>
-      <div id="revealCanvasWrap" class="center" style="margin-top:12px"></div>
+      <div id="revealCanvasWrap" class="center" style="margin-top:12px; width:100%"></div>
       <div id="scores" style="margin-top:8px"></div>
       <div style="margin-top:8px"><button id="newRoundBtn">Neue Runde</button></div>
     </div>
@@ -111,7 +111,7 @@ let players = []; // {name,color,status: 'pending'|'master'|'current'|'done'}
 let categories = ["Schlechter Film - Guter Film","Heiß - Kalt","Mutig - Ängstlich"];
 let masterIndex = 0;
 let targetAngle = null; // 0..180
-let confirmedGuesses = {}; // name -> angle (kept hidden during guess phase)
+let confirmedGuesses = {}; // name -> angle
 let currentPicker = null; // name of player currently picking
 let tempAngle = null;
 let canvasMaster, canvasGuess, mctx, gctx;
@@ -150,7 +150,6 @@ function renderPalette(){
     }
     wrap.appendChild(b);
   });
-  // Wenn ausgewählte Farbe bereits verwendet wurde -> wähle erste freie
   if(players.some(p=>p.color === selectedPaletteColor)){
     const free = PALETTE.find(c => !players.some(p=>p.color===c));
     if(free) selectedPaletteColor = free;
@@ -169,8 +168,7 @@ function renderPlayersArea(){
   });
   document.querySelectorAll('.removeBtn').forEach(b=>b.addEventListener('click', e=>{
     const i = +e.currentTarget.dataset.i;
-    const removed = players.splice(i,1)[0];
-    // Farbe wieder freigeben (renderPalette nimmt das automatisch auf)
+    players.splice(i,1);
     renderPlayersArea();
     renderPalette();
   }));
@@ -180,7 +178,6 @@ el('addPlayer').addEventListener('click', ()=>{
   const name = el('playerName').value.trim();
   if(!name) return;
   if(players.find(p=>p.name === name)){ alert('Name bereits vorhanden'); return; }
-  // selected color must not be used
   if(players.some(p=>p.color === selectedPaletteColor)){ alert('Diese Farbe ist bereits vergeben. Wähle eine andere.'); return; }
   players.push({name, color: selectedPaletteColor, status: 'pending'});
   el('playerName').value = '';
@@ -207,7 +204,6 @@ function startRound(){
   el('categoryText').textContent = categories[Math.floor(Math.random()*categories.length)];
   el('roundInfo').textContent = `Spielmacher: ${players[masterIndex].name}`;
   el('masterName').textContent = players[masterIndex].name;
-  // UI
   el('masterArea').style.display='block';
   el('guessArea').style.display='none';
   el('resultsArea').style.display='none';
@@ -223,7 +219,7 @@ function startRound(){
 function setupCanvases(){
   canvasMaster = el('canvasMaster'); canvasGuess = el('canvasGuess');
   mctx = canvasMaster.getContext('2d'); gctx = canvasGuess.getContext('2d');
-  function resize(c,ctx,h=280){
+  function resize(c,ctx,h=340){
     const dpi = window.devicePixelRatio || 1;
     const parent = c.parentElement;
     const w = Math.max(320, parent.clientWidth - 12);
@@ -233,40 +229,41 @@ function setupCanvases(){
     c.height = Math.floor(h * dpi);
     ctx.setTransform(dpi,0,0,dpi,0,0);
   }
-  resize(canvasMaster,mctx,280);
-  resize(canvasGuess,gctx,280);
-  window.addEventListener('resize', ()=>{ resize(canvasMaster,mctx,280); resize(canvasGuess,gctx,280); renderMaster(false); renderGuess(); });
+  resize(canvasMaster,mctx,340);
+  resize(canvasGuess,gctx,340);
+  window.addEventListener('resize', ()=>{ resize(canvasMaster,mctx,340); resize(canvasGuess,gctx,340); renderMaster(false); renderGuess(); });
 }
 function metrics(ctx){
   const dpi = window.devicePixelRatio || 1;
   const w = ctx.canvas.width / dpi;
   const h = ctx.canvas.height / dpi;
   const cx = w / 2;
-  const cy = h - 18; // falls nötig hier anpassen
-  const r = Math.min(w/2 - 20, h - 36);
+  // Halbkreis insgesamt größer: cy näher an top (kleinerer subtrahend) und r größer
+  const cy = h - 12; // etwas kleinerer Rand -> Halbkreis steigt etwas
+  const r = Math.min(w/2 - 8, h - 18); // deutlich größerer Radius
   return {w,h,cx,cy,r};
 }
 
 // --------------- Zeichnen -----------------
-// draw base semicircle (ohne ticks/nummern)
 function drawBase(ctx){
   const m = metrics(ctx);
   ctx.clearRect(0,0,ctx.canvas.width/(window.devicePixelRatio||1), ctx.canvas.height/(window.devicePixelRatio||1));
   // semicircle from PI to 2PI (left -> top -> right)
   ctx.beginPath(); ctx.moveTo(m.cx - m.r, m.cy); ctx.arc(m.cx, m.cy, m.r, Math.PI, 2*Math.PI, false); ctx.closePath();
   ctx.fillStyle = '#fff'; ctx.fill();
-  ctx.lineWidth = 1.4; ctx.strokeStyle = '#c7cfe0'; ctx.stroke();
+  ctx.lineWidth = 1.6; ctx.strokeStyle = '#c7cfe0'; ctx.stroke();
 }
 
-// draw colored wedges inside semicircle (halfDeg increased by +1 => +2° total)
+// Alle Keile jetzt gleich groß (halfDeg unified)
 function drawTargetSegmentsInside(ctx, centerAngle){
   const m = metrics(ctx);
   const outer = m.r - 6;
   const inner = Math.max(m.r - 96, m.r * 0.45);
+  const halfDeg = 2.2; // größerer Wert -> alle Keile gleich groß (entspricht gewünschter Größe)
 
-  function wedge(angleDeg, halfDeg, color, label){
+  function wedge(angleDeg, halfDegLocal, color, label){
     const centerRad = Math.PI + (angleDeg * Math.PI/180);
-    const halfRad = halfDeg * Math.PI/180;
+    const halfRad = halfDegLocal * Math.PI/180;
     const start = centerRad - halfRad;
     const end   = centerRad + halfRad;
     ctx.beginPath();
@@ -278,19 +275,17 @@ function drawTargetSegmentsInside(ctx, centerAngle){
     ctx.closePath();
     ctx.fillStyle = color; ctx.globalAlpha = 0.95; ctx.fill(); ctx.globalAlpha = 1;
     ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.stroke();
-    // small label inside wedge (optional)
     const mid = centerRad;
     const lx = m.cx + (inner + (outer-inner)/2) * Math.cos(mid);
     const ly = m.cy + (inner + (outer-inner)/2) * Math.sin(mid);
     ctx.fillStyle = '#111'; ctx.font = 'bold 12px sans-serif'; ctx.fillText(label, lx-6, ly+4);
   }
 
-  // original halfDegs were approx 1.4,1.4,1.1,1.1,0.9 -> add +1 degree to each half
-  wedge(centerAngle+2, 2.4, '#16a34a', '3');
-  wedge(centerAngle-2, 2.4, '#16a34a', '3');
-  wedge(centerAngle+1, 2.1, '#f59e0b', '4');
-  wedge(centerAngle-1, 2.1, '#f59e0b', '4');
-  wedge(centerAngle,   1.9, '#ef4444', '5');
+  wedge(centerAngle+2, halfDeg, '#16a34a', '3');
+  wedge(centerAngle-2, halfDeg, '#16a34a', '3');
+  wedge(centerAngle+1, halfDeg, '#f59e0b', '4');
+  wedge(centerAngle-1, halfDeg, '#f59e0b', '4');
+  wedge(centerAngle,   halfDeg, '#ef4444', '5');
 }
 
 // draw player arrow
@@ -325,17 +320,16 @@ function renderMaster(force=false){
   }
 }
 
-// IMPORTANT: während des Guessing werden bestätigte Markierungen **nicht** angezeigt
+// während Guess-Phase: bestätigte Pfeile **nicht** anzeigen
 function renderGuess(){
   drawBase(gctx);
-  // keine confirmedGuesses hier (versteckt)
   if(currentPicker && tempAngle !== null){
     const p = players.find(pp=>pp.name===currentPicker);
     if(p) drawArrow(gctx, tempAngle, p.color, p.name, true);
   }
 }
 
-// --------------- Player Liste (für Auswahl) -----------------
+// --------------- Player Liste -----------------
 function renderPlayerList(){
   const cont = el('playerList'); cont.innerHTML='';
   players.forEach(p=>{
@@ -363,8 +357,6 @@ function renderPlayerList(){
 }
 
 // --------------- Pointer -> Winkel (robust) ---------------
-// Verwende Kombination aus arccos und atan2, entscheide per Projektdistanz.
-// Gibt angle 0..180 oder null.
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
   const x = clientX - rect.left;
@@ -373,13 +365,11 @@ function canvasToAngle(clientX, clientY, ctx){
 
   if(y > m.cy + 36) return null;
 
-  // Kandidat B: arccos per x (stabil)
   let nx = (x - m.cx) / m.r;
   nx = Math.max(-1, Math.min(1, nx));
   const arcRad = Math.acos(nx);
   let angleB = 180 - (arcRad * 180 / Math.PI);
 
-  // Kandidat A: atan2 mit gespiegeltem y
   const dxA = x - m.cx;
   const dyA = m.cy - y;
   let phi = Math.atan2(dyA, dxA);
@@ -433,31 +423,31 @@ function bindGuessDrag(){
 el('confirmBtn').addEventListener('click', ()=>{
   if(!currentPicker){ alert('Wähle zuerst deinen Namen'); return; }
   if(tempAngle === null){ alert('Ziehe zuerst den Pfeil'); return; }
-  // bestätige, aber zeige es nicht für andere -> in confirmedGuesses speichern
   confirmedGuesses[currentPicker] = tempAngle;
   const p = players.find(pp=>pp.name === currentPicker); if(p) p.status = 'done';
   currentPicker = null; tempAngle = null;
   el('confirmBtn').style.display = 'none';
-  el('selectNotice').textContent = 'Markierung gespeichert.';
-  setTimeout(()=>el('selectNotice').textContent = '', 900);
+  el('selectNotice').textContent = 'Markierung gespeichert.'; setTimeout(()=>el('selectNotice').textContent = '', 900);
   renderPlayerList();
   renderGuess();
 
-  // sind alle fertig?
   const remaining = players.filter(pp=>pp.status !== 'done' && pp.status !== 'master');
   if(remaining.length === 0){
-    // Zeige Hinweis: Handy an Spielmacher zurückgeben + Button "Ergebnis anzeigen (Spielmacher)"
     el('guessArea').style.display='none';
     el('resultsArea').style.display='block';
     el('postRoundNotice').style.display='block';
     el('postRoundNotice').textContent = 'Alle Spieler haben gewählt. Bitte gebe das Handy an den Spielmacher zurück.';
     const ctrl = el('postRoundControls'); ctrl.innerHTML = '';
-    const btn = document.createElement('button'); btn.textContent = 'Ergebnis anzeigen (Spielmacher)'; btn.addEventListener('click', ()=>{
-      // Sobald Spielmacher bereit, zeige Halbkreis + Segmente + alle Pfeile
+    const btn = document.createElement('button');
+    btn.textContent = 'Ergebnis anzeigen (Spielmacher)';
+    btn.addEventListener('click', ()=>{
+      // Use revealCanvasWrap size (visible) instead of hidden canvasGuess parent
       renderReveal(true);
       renderScores();
       btn.disabled = true;
       el('postRoundNotice').style.display = 'none';
+      // scroll into view for convenience
+      el('revealCanvasWrap').scrollIntoView({behavior:'smooth', block:'center'});
     });
     ctrl.appendChild(btn);
   }
@@ -472,7 +462,7 @@ el('cancelBtn').addEventListener('click', ()=>{
   }
 });
 
-// --------------- Master show/hide -----------------
+// --------------- Master controls -----------------
 el('showTargetBtn').addEventListener('click', ()=>{
   masterShow = true; el('masterHint').style.display='block';
   el('showTargetBtn').style.display='none'; el('hideTargetBtn').style.display='inline-block';
@@ -486,7 +476,6 @@ el('hideTargetBtn').addEventListener('click', ()=>{
 el('masterDoneBtn').addEventListener('click', ()=>{
   el('masterArea').style.display='none';
   el('guessArea').style.display='block';
-  // beim Weitergeben Drag-Bind aktivieren
   renderGuess();
   renderPlayerList();
   bindGuessDrag();
@@ -494,20 +483,22 @@ el('masterDoneBtn').addEventListener('click', ()=>{
 
 // --------------- Reveal & Score -----------------
 function renderReveal(showTarget){
-  // build canvas and show ALL confirmedGuesses arrows + target segments
-  const w = canvasGuess.parentElement.clientWidth, h = 240;
-  const c = document.createElement('canvas'); const dpi = window.devicePixelRatio||1;
+  const wrap = el('revealCanvasWrap');
+  const w = wrap.clientWidth || Math.max(320, document.documentElement.clientWidth - 24);
+  const h = 260;
+  const c = document.createElement('canvas'); const dpi = window.devicePixelRatio || 1;
   c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi);
   c.style.width = w + 'px'; c.style.height = h + 'px';
   const ctx = c.getContext('2d'); ctx.setTransform(dpi,0,0,dpi,0,0);
   drawBase(ctx);
-  // draw all players' arrows (including those marked done & master excluded)
+  // draw all confirmed player arrows
   Object.entries(confirmedGuesses).forEach(([name,ang])=>{
     const p = players.find(pp=>pp.name === name);
     if(p) drawArrow(ctx, ang, p.color, name, false);
   });
   if(showTarget) drawTargetSegmentsInside(ctx, targetAngle);
-  const wrap = el('revealCanvasWrap'); wrap.innerHTML=''; wrap.appendChild(c);
+  wrap.innerHTML = '';
+  wrap.appendChild(c);
 }
 
 function renderScores(){
