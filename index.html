@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength - Spiel (Fix gespiegelt)</title>
+<title>Wavelength - Spiel (Winkel-Fix)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -111,7 +111,7 @@ let currentPicker = null;
 let categoryThisRound = '';
 let canvasMaster, canvasGuess, mctx, gctx;
 
-// helpers
+// helper color functions
 function hexToRgb(hex){ const h=hex.replace('#',''); const n=parseInt(h,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
 function rgba(hex,a=1){ const [r,g,b]=hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
 
@@ -241,7 +241,7 @@ function drawTargetSegmentsInside(ctx, centerAngle){
   wedge(centerAngle,   0.9, '#ef4444', '5');
 }
 
-// ---------- drawArrow (keine Änderung nötig hier; kept for clarity) ----------
+// ---------- drawArrow ----------
 function drawArrow(ctx, angle, color, label, highlighted=false){
   const m = metrics(ctx);
   const ang = Math.PI - (angle * Math.PI/180);
@@ -312,28 +312,29 @@ function renderPlayerList(){
   });
 }
 
-// ---------- canvasToAngle (gespiegelt über X-Achse) ----------
+// ---------- canvasToAngle (korrekte Spiegelung über X-Achse) ----------
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
   const m = metrics(ctx);
 
-  // Spiegelung über x-Achse: dy = cy - y (nicht y - cy)
-  const dx = x - m.cx;
-  const dy = m.cy - y; // <-- gespiegelt
-
-  // Winkel in Grad (atan2 mit gespiegeltem dy)
-  let theta = Math.atan2(dy, dx); // -PI .. PI
-  let angleDeg = theta * 180 / Math.PI; // -180 .. 180
-  // Normalisiere auf 0..360
+  // Berechne Rohwinkel phi = atan2(cy - y, x - cx)
+  // phi: right=0, top=90, left=180 deg
+  const phi = Math.atan2(m.cy - y, x - m.cx); // radians
+  let phiDeg = phi * 180 / Math.PI; // -180 .. 180
+  // angleDeg so dass: left=0, top=90, right=180 => angleDeg = 180 - phiDeg
+  let angleDeg = 180 - phiDeg;
+  // normalisiere auf 0..360 und akzeptiere nur 0..180
   angleDeg = (angleDeg + 360) % 360;
-  // Akzeptiere nur obere Hälfte 0..180
   if(angleDeg < 0 || angleDeg > 180) return null;
 
-  // Distanzkontrolle (kein zu weiter Klick)
-  const dist = Math.sqrt((x - m.cx)*(x - m.cx) + (y - m.cy)*(y - m.cy));
-  if(dist > m.r + 6) return null;
+  // Distanzkontrolle: nur wenn Pointer nahe genug an Bogen bzw. oberhalb Basislinie
+  const dx = x - m.cx;
+  const dyReal = y - m.cy;
+  const dist = Math.sqrt(dx*dx + dyReal*dyReal);
+  if(y > m.cy + 8) return null;      // unterhalb Basislinie nicht erlaubt
+  if(dist > m.r + 12) return null;   // zu weit draußen nicht erlaubt
 
   return Math.round(angleDeg);
 }
