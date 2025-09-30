@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength – Spiel (fix: Ränder, gleiche Segmente, Rundenergebnis)</title>
+<title>Wavelength – Spiel (Fix: Ränder, 3-4-5-4-3, Punkte korrekt)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -15,7 +15,7 @@
   button.secondary{background:#4b5563}
   .small{font-size:0.9rem;color:#555}
   .row{display:flex;gap:8px;align-items:center}
-  .canvas-wrap{width:100%;height:400px;border-radius:8px;background:linear-gradient(180deg,#fff,#f3f4f6);touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .canvas-wrap{width:100%;height:420px;border-radius:8px;background:linear-gradient(180deg,#fff,#f3f4f6);touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
   canvas{max-width:100%;height:100%;border-radius:8px;display:block}
   .palette{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
   .pal-btn{width:36px;height:36px;border-radius:6px;border:2px solid transparent;cursor:pointer}
@@ -66,11 +66,9 @@
   <div class="card" id="gameCard" style="display:none">
     <h2>Runde</h2>
     <div id="roundInfo" class="small muted"></div>
-    <div style="margin-top:8px">
-      <div id="categoryText" class="small" style="margin-top:8px"></div>
-    </div>
-
+    <div style="margin-top:8px"><div id="categoryText" class="small" style="margin-top:8px"></div></div>
     <hr>
+
     <div id="masterArea" style="display:none">
       <div class="small">Spielmacher: <strong id="masterName"></strong></div>
       <div class="canvas-wrap" style="margin-top:8px"><canvas id="canvasMaster"></canvas></div>
@@ -109,12 +107,12 @@
 <footer class="small muted">Speichere <code>kategorien.csv</code> in deinem Repo-Root, eine Kategorie pro Zeile.</footer>
 
 <script>
-// ---------------- CONFIG (leicht anpassbar) ----------------
-const DEFAULT_SEGMENT_DEG_FULL = 5.0; // voller Keil in Grad (z.B. 5°)
-const SEGMENT_HALF_DEG = DEFAULT_SEGMENT_DEG_FULL / 2.0; // interne Halbwinkel
-const ARROW_OUTER_OFFSET = 28; // px, wie weit der Pfeil-Basisbereich idealerweise außerhalb des Bogens liegt
-const ARROW_BASE_ANGLE_WIDTH = 0.048; // radians für Basisbreite der Pfeile
-// ------------------------------------------------------------
+// ---------------- CONFIG ----------------
+const SEGMENT_FULL_DEG = 5.0;          // voller Keil in Grad (z.B. 5°)
+const SEGMENT_HALF_DEG = SEGMENT_FULL_DEG / 2.0;
+const ARROW_OUTER_OFFSET = 36;         // Abstand Basis-Pfeil von äußerem Bogen (px)
+const ARROW_BASE_ANGLE_WIDTH = 0.048;  // radians -> Breite des Pfeil-Basiswinkels
+// ----------------------------------------
 
 const el = id => document.getElementById(id);
 const PALETTE = ['#ef4444','#f97316','#f59e0b','#eab308','#84cc16','#10b981','#06b6d4','#3b82f6','#8b5cf6','#ec4899'];
@@ -126,8 +124,8 @@ let targetAngle = null; // 0..180
 let confirmedGuesses = {}; // name -> angle
 let currentPicker = null;
 let tempAngle = null;
-let totalScores = {}; // kumuliert über Runden
-let roundPointsAdded = false; // verhindert doppelte Addition pro Runde
+let totalScores = {}; // kumuliert
+let roundPointsAdded = false;
 
 let canvasMaster, canvasGuess, mctx, gctx;
 
@@ -135,7 +133,7 @@ let canvasMaster, canvasGuess, mctx, gctx;
 function hexToRgb(hex){ const h=hex.replace('#',''); const n=parseInt(h,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
 function rgba(hex,a=1){ const [r,g,b]=hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
 
-// load CSV
+// load CSV categories
 async function loadCategoriesCSV(){
   try{
     const resp = await fetch('kategorien.csv');
@@ -146,7 +144,7 @@ async function loadCategoriesCSV(){
   }catch(e){ console.log('CSV load error', e); }
 }
 
-// Palette & Spieler UI
+// Palette & players UI
 function renderPalette(){
   const wrap = el('palette'); wrap.innerHTML='';
   PALETTE.forEach(c=>{
@@ -157,11 +155,7 @@ function renderPalette(){
     if(c === selectedPaletteColor && !used) b.classList.add('selected');
     b.title = used ? 'Bereits gewählt' : 'Wähle diese Farbe';
     if(!used){
-      b.addEventListener('click', ()=>{
-        selectedPaletteColor = c;
-        document.querySelectorAll('.pal-btn').forEach(x=>x.classList.remove('selected'));
-        b.classList.add('selected');
-      });
+      b.addEventListener('click', ()=>{ selectedPaletteColor = c; document.querySelectorAll('.pal-btn').forEach(x=>x.classList.remove('selected')); b.classList.add('selected'); });
     }
     wrap.appendChild(b);
   });
@@ -182,10 +176,9 @@ function renderPlayersArea(){
     area.appendChild(div);
   });
   document.querySelectorAll('.removeBtn').forEach(b=>b.addEventListener('click', e=>{
-    const i = +e.currentTarget.dataset.i;
-    players.splice(i,1);
-    renderPlayersArea();
-    renderPalette();
+    const i = +e.currentTarget.dataset.i; const removed = players.splice(i,1)[0];
+    // free color automatically via renderPalette
+    renderPlayersArea(); renderPalette();
   }));
 }
 
@@ -196,95 +189,78 @@ el('addPlayer').addEventListener('click', ()=>{
   if(players.some(p=>p.color === selectedPaletteColor)){ alert('Diese Farbe ist bereits vergeben. Wähle eine andere.'); return; }
   players.push({name, color: selectedPaletteColor, status: 'pending'});
   el('playerName').value = '';
-  renderPlayersArea();
-  renderPalette();
+  renderPlayersArea(); renderPalette();
 });
 
-// Spielstart & Rundenlogik
+// start game
 el('startGame').addEventListener('click', async ()=>{
   if(players.length < 2){ alert('Mindestens 2 Spieler erforderlich'); return; }
   await loadCategoriesCSV();
-  // init totals
-  totalScores = {};
-  players.forEach(p => totalScores[p.name] = 0);
-  el('setupCard').style.display='none';
-  el('gameCard').style.display='block';
-  masterIndex = Math.floor(Math.random() * players.length);
+  totalScores = {}; players.forEach(p => totalScores[p.name] = 0);
+  el('setupCard').style.display='none'; el('gameCard').style.display='block';
+  masterIndex = Math.floor(Math.random()*players.length);
   startRound();
 });
 
 function startRound(){
-  confirmedGuesses = {};
-  currentPicker = null; tempAngle = null;
-  roundPointsAdded = false;
-  players.forEach(p => p.status = 'pending');
-  players[masterIndex].status = 'master';
-  targetAngle = Math.floor(Math.random() * (178 - 2 + 1)) + 2; // 2..178
+  confirmedGuesses = {}; currentPicker = null; tempAngle = null; roundPointsAdded = false;
+  players.forEach(p=>p.status='pending'); players[masterIndex].status='master';
+  targetAngle = Math.floor(Math.random()*(178-2+1))+2;
   el('categoryText').textContent = categories[Math.floor(Math.random()*categories.length)];
   el('roundInfo').textContent = `Spielmacher: ${players[masterIndex].name}`;
   el('masterName').textContent = players[masterIndex].name;
-  el('masterArea').style.display='block';
-  el('guessArea').style.display='none';
-  el('resultsArea').style.display='none';
-  el('masterHint').style.display='none';
-  el('showTargetBtn').style.display='inline-block';
-  el('hideTargetBtn').style.display='none';
-  renderMaster(false);
-  renderGuess();
-  renderPlayerList();
-  renderTotals(); // show current totals
+  el('masterArea').style.display='block'; el('guessArea').style.display='none'; el('resultsArea').style.display='none';
+  el('masterHint').style.display='none'; el('showTargetBtn').style.display='inline-block'; el('hideTargetBtn').style.display='none';
+  renderMaster(false); renderGuess(); renderPlayerList(); renderTotals();
 }
 
-// Canvas setup & metrics
+// canvas setup & metrics
 function setupCanvases(){
   canvasMaster = el('canvasMaster'); canvasGuess = el('canvasGuess');
   mctx = canvasMaster.getContext('2d'); gctx = canvasGuess.getContext('2d');
-  function resize(c,ctx,h=360){
+  function resize(c,ctx,h=380){
     const dpi = window.devicePixelRatio || 1;
-    const parent = c.parentElement;
-    const w = Math.max(320, parent.clientWidth - 12);
-    c.style.width = w + 'px';
-    c.style.height = h + 'px';
-    c.width = Math.floor(w * dpi);
-    c.height = Math.floor(h * dpi);
+    const parent = c.parentElement; const w = Math.max(320, parent.clientWidth - 12);
+    c.style.width = w + 'px'; c.style.height = h + 'px';
+    c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi);
     ctx.setTransform(dpi,0,0,dpi,0,0);
   }
-  resize(canvasMaster,mctx,360);
-  resize(canvasGuess,gctx,360);
-  window.addEventListener('resize', ()=>{ resize(canvasMaster,mctx,360); resize(canvasGuess,gctx,360); renderMaster(false); renderGuess(); });
+  resize(canvasMaster,mctx,380); resize(canvasGuess,gctx,380);
+  window.addEventListener('resize', ()=>{ resize(canvasMaster,mctx,380); resize(canvasGuess,gctx,380); renderMaster(false); renderGuess(); });
 }
 function metrics(ctx){
   const dpi = window.devicePixelRatio || 1;
-  const w = ctx.canvas.width / dpi;
-  const h = ctx.canvas.height / dpi;
-  const cx = w / 2;
-  const cy = h - 10; // Halbkreis etwas größer und höher
-  const r = Math.min(w/2 - 6, h - 12); // größerer Radius
+  const w = ctx.canvas.width / dpi; const h = ctx.canvas.height / dpi; const cx = w/2;
+  const cy = h - 8; const r = Math.min(w/2 - 8, h - 12);
   return {w,h,cx,cy,r};
 }
 
-// Zeichnen Basis (ohne ticks)
+// draw base semicircle
 function drawBase(ctx){
   const m = metrics(ctx);
   ctx.clearRect(0,0,ctx.canvas.width/(window.devicePixelRatio||1), ctx.canvas.height/(window.devicePixelRatio||1));
   ctx.beginPath(); ctx.moveTo(m.cx - m.r, m.cy); ctx.arc(m.cx, m.cy, m.r, Math.PI, 2*Math.PI, false); ctx.closePath();
-  ctx.fillStyle = '#fff'; ctx.fill();
-  ctx.lineWidth = 1.6; ctx.strokeStyle = '#c7cfe0'; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 1.6; ctx.strokeStyle = '#c7cfe0'; ctx.stroke();
 }
 
-// Segmente — gleich groß, centers spaced by fullDeg
+// helper: build centers array (left->right) and labels/colors
+function getSegmentCentersAndMeta(centerAngle){
+  const full = SEGMENT_FULL_DEG;
+  const centers = [centerAngle - 2*full, centerAngle - full, centerAngle, centerAngle + full, centerAngle + 2*full];
+  // clamp centers to 0..180 (if edge, still keep sorted left->right)
+  const centersClamped = centers.map(c => Math.max(0, Math.min(180, c)));
+  // labels & colors in order left->right: 3,4,5,4,3
+  const labels = [3,4,5,4,3];
+  const colors = ['#16a34a','#f59e0b','#ef4444','#f59e0b','#16a34a'];
+  return {centers: centersClamped, labels, colors};
+}
+
+// draw segments equal size and correct order 3,4,5,4,3
 function drawTargetSegmentsInside(ctx, centerAngle){
   const m = metrics(ctx);
-  const outer = m.r - 6;
-  const inner = Math.max(m.r - 100, m.r * 0.40);
-  const halfDeg = SEGMENT_HALF_DEG; // konfigurierbar
-  const fullDeg = halfDeg * 2;
-  // centers: targetAngle + k * fullDeg for k=-2..2
-  const centers = [-2, -1, 0, 1, 2].map(k => Math.max(0, Math.min(180, centerAngle + k * fullDeg)));
-
-  const colors = ['#16a34a','#16a34a','#ef4444','#f59e0b','#f59e0b'];
-  const labels = ['3','3','5','4','4']; // mit Reihenfolge passend zu centers (left to right)
-  // Note: center ordering left->right corresponds to k=-2..2 above
+  const outer = m.r - 6; const inner = Math.max(m.r - 100, m.r * 0.40);
+  const halfDeg = SEGMENT_HALF_DEG;
+  const {centers, labels, colors} = getSegmentCentersAndMeta(centerAngle);
   for(let i=0;i<centers.length;i++){
     const angleDeg = centers[i];
     const color = colors[i];
@@ -292,7 +268,7 @@ function drawTargetSegmentsInside(ctx, centerAngle){
     const centerRad = Math.PI + (angleDeg * Math.PI/180);
     const halfRad = halfDeg * Math.PI/180;
     const start = centerRad - halfRad;
-    const end   = centerRad + halfRad;
+    const end = centerRad + halfRad;
     ctx.beginPath();
     ctx.moveTo(m.cx + inner*Math.cos(start), m.cy + inner*Math.sin(start));
     ctx.lineTo(m.cx + outer*Math.cos(start), m.cy + outer*Math.sin(start));
@@ -305,79 +281,57 @@ function drawTargetSegmentsInside(ctx, centerAngle){
     const mid = centerRad;
     const lx = m.cx + (inner + (outer-inner)/2) * Math.cos(mid);
     const ly = m.cy + (inner + (outer-inner)/2) * Math.sin(mid);
-    ctx.fillStyle = '#111'; ctx.font = 'bold 12px sans-serif'; ctx.fillText(label, lx-6, ly+4);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 12px sans-serif'; ctx.fillText(String(label), lx-6, ly+4);
   }
 }
 
-// Pfeile zeigen von außen auf den äußeren Bogen; Basis wird so gewählt, dass sie nicht außerhalb der Canvas fällt
+// draw arrow: outside -> tip on outer arc; clamp base radius so not clipped at edges
 function drawArrow(ctx, angle, color, label, highlighted=false){
   const m = metrics(ctx);
   const ang = Math.PI + (angle * Math.PI/180);
-  const outerR = m.r; // Spitze sitzt auf äußeren Rand
-  // ideal base outside
-  let idealBaseR = m.r + ARROW_OUTER_OFFSET;
-  // compute max allowed base radius so base x/y remain inside canvas with a small margin
+  const outerR = m.r; // tip on outer border
+  let baseOuterR = m.r + ARROW_OUTER_OFFSET; // ideal
+
+  // clamp baseOuterR so base points stay within canvas + margin
   const margin = 6;
-  const maxLeft = m.cx - margin;               // maximum allowed distance to left edge
-  const maxRight = m.w - m.cx - margin;        // maximum allowed distance to right edge
-  const maxAllowed = Math.max(0, Math.min(maxLeft, maxRight));
-  // convert maxAllowed from px to radius relative to center (distance from center)
-  // if maxAllowed is smaller than idealBaseR, limit it
-  let baseOuterR = Math.min(idealBaseR, m.r + Math.max(2, maxAllowed - (m.r - m.cx + margin))); // fallback
-  // Simpler & safer: clamp to canvas box so base coords not outside
-  // We'll compute base coords and if they fall outside we reduce baseOuterR in a loop
-  const clampBaseOuterR = (rCandidate) => {
+  const tryClamp = (rCandidate) => {
     let r = rCandidate;
-    // compute coords for left/right extremes and reduce if out of bounds
-    const check = (rVal, a) => {
-      const x = m.cx + rVal * Math.cos(a);
-      const y = m.cy + rVal * Math.sin(a);
-      return x >= margin && x <= m.w - margin && y >= margin && y <= m.h - margin;
-    };
-    // reduce until both left and right near-angle positions are in canvas
-    let attempts = 0;
-    while(attempts < 20){
-      const okLeft = check(r, Math.PI + (0 * Math.PI/180));
-      // check at specific angle (current ang) and its extremes
-      const okAt = check(r, ang + ARROW_BASE_ANGLE_WIDTH);
-      const okAt2 = check(r, ang - ARROW_BASE_ANGLE_WIDTH);
-      if(okAt && okAt2) break;
+    for(let attempt=0; attempt<30; attempt++){
+      const leftX  = m.cx + r * Math.cos(ang + ARROW_BASE_ANGLE_WIDTH);
+      const leftY  = m.cy + r * Math.sin(ang + ARROW_BASE_ANGLE_WIDTH);
+      const rightX = m.cx + r * Math.cos(ang - ARROW_BASE_ANGLE_WIDTH);
+      const rightY = m.cy + r * Math.sin(ang - ARROW_BASE_ANGLE_WIDTH);
+      const okLeft = leftX >= margin && leftX <= (m.w - margin) && leftY >= margin && leftY <= (m.h - margin);
+      const okRight = rightX >= margin && rightX <= (m.w - margin) && rightY >= margin && rightY <= (m.h - margin);
+      if(okLeft && okRight) break;
       r -= 6;
       if(r <= m.r + 2) { r = m.r + 2; break; }
-      attempts++;
     }
     return r;
   };
-  baseOuterR = clampBaseOuterR(idealBaseR);
+  baseOuterR = tryClamp(baseOuterR);
 
-  // Spitze: auf äußerem Rand (a tiny bit inward so it doesn't overlap stroke)
+  // tip slightly inset to avoid overlap stroke
   const tipX = m.cx + (outerR - 1) * Math.cos(ang), tipY = m.cy + (outerR - 1) * Math.sin(ang);
-  // Basispunkte außen (seitlich)
   const leftX  = m.cx + baseOuterR * Math.cos(ang + ARROW_BASE_ANGLE_WIDTH);
   const leftY  = m.cy + baseOuterR * Math.sin(ang + ARROW_BASE_ANGLE_WIDTH);
   const rightX = m.cx + baseOuterR * Math.cos(ang - ARROW_BASE_ANGLE_WIDTH);
   const rightY = m.cy + baseOuterR * Math.sin(ang - ARROW_BASE_ANGLE_WIDTH);
 
-  ctx.beginPath();
-  ctx.moveTo(leftX, leftY);
-  ctx.lineTo(tipX, tipY);
-  ctx.lineTo(rightX, rightY);
-  ctx.closePath();
-  ctx.fillStyle = rgba(color,1);
-  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(leftX,leftY); ctx.lineTo(tipX,tipY); ctx.lineTo(rightX,rightY); ctx.closePath();
+  ctx.fillStyle = rgba(color,1); ctx.fill();
   if(highlighted){ ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.stroke(); }
 
-  // Label etwas weiter außen neben Basis (but ensure inside)
-  const labelR = Math.min(baseOuterR + 6, Math.max(m.r + 12, m.cx - 10));
-  const lx = m.cx + labelR * Math.cos(ang);
-  const ly = m.cy + labelR * Math.sin(ang);
+  // label aside - clamp inside canvas
+  const labelR = baseOuterR + 8;
+  let lx = m.cx + labelR * Math.cos(ang);
+  let ly = m.cy + labelR * Math.sin(ang);
+  const labelX = Math.min(Math.max(lx + 8, 6), m.w - 80);
   ctx.fillStyle = '#000'; ctx.font = highlighted ? 'bold 13px sans-serif' : '12px sans-serif';
-  // clamp label position
-  const labelX = Math.min(Math.max(lx + 8, 6), m.w - 60);
   ctx.fillText(label, labelX, ly + 4);
 }
 
-// Render Master (Segmente sichtbar nur wenn gezeigt)
+// render master view
 let masterShow = false;
 function renderMaster(force=false){
   drawBase(mctx);
@@ -391,7 +345,7 @@ function renderMaster(force=false){
   }
 }
 
-// Während Guess-Phase: bestätigte Pfeile nicht anzeigen
+// render guess canvas (do not draw confirmed players)
 function renderGuess(){
   drawBase(gctx);
   if(currentPicker && tempAngle !== null){
@@ -400,14 +354,13 @@ function renderGuess(){
   }
 }
 
-// Spielerliste UI
+// player list UI
 function renderPlayerList(){
   const cont = el('playerList'); cont.innerHTML='';
   players.forEach(p=>{
     if(p.status === 'master') return;
     const btn = document.createElement('button');
-    btn.textContent = p.name;
-    btn.style.color = 'black';
+    btn.textContent = p.name; btn.style.color='black';
     btn.classList.remove('done','current');
     if(p.status === 'done') btn.classList.add('done');
     if(p.status === 'current') btn.classList.add('current');
@@ -420,26 +373,22 @@ function renderPlayerList(){
       p.status = 'current'; currentPicker = p.name; tempAngle = null;
       el('selectNotice').textContent = `Markiere jetzt: ${p.name}`;
       el('confirmBtn').style.display = 'inline-block';
-      renderPlayerList();
-      renderGuess();
+      renderPlayerList(); renderGuess();
     });
     cont.appendChild(btn);
   });
 }
 
-// Pointer->Angle (robust)
+// robust canvas->angle
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
+  const x = clientX - rect.left; const y = clientY - rect.top;
   const m = metrics(ctx);
-  if(y > m.cy + 40) return null;
-  let nx = (x - m.cx) / m.r;
-  nx = Math.max(-1, Math.min(1, nx));
+  if(y > m.cy + 60) return null;
+  let nx = (x - m.cx) / m.r; nx = Math.max(-1, Math.min(1, nx));
   const arcRad = Math.acos(nx);
   let angleB = 180 - (arcRad * 180 / Math.PI);
-  const dxA = x - m.cx;
-  const dyA = m.cy - y;
+  const dxA = x - m.cx; const dyA = m.cy - y;
   let phi = Math.atan2(dyA, dxA); let phiDeg = phi * 180 / Math.PI;
   let angleA = 180 - phiDeg; angleA = (angleA + 360) % 360;
   if(angleA < 0 || angleA > 180) angleA = null;
@@ -452,12 +401,12 @@ function canvasToAngle(clientX, clientY, ctx){
   const dA = projDist(angleA), dB = projDist(angleB);
   const chosen = (dA <= dB) ? angleA : angleB;
   const dx = x - m.cx, dy = y - m.cy; const distToCenter = Math.hypot(dx, dy);
-  if(distToCenter > m.r + 64) return null;
+  if(distToCenter > m.r + 80) return null;
   if(distToCenter < m.r * 0.2) return null;
   return (chosen === null) ? null : Math.round(chosen);
 }
 
-// Drag binding
+// bind drag
 function bindGuessDrag(){
   let dragging = false;
   canvasGuess.addEventListener('pointerdown', e=>{
@@ -487,29 +436,19 @@ el('confirmBtn').addEventListener('click', ()=>{
   currentPicker = null; tempAngle = null;
   el('confirmBtn').style.display = 'none';
   el('selectNotice').textContent = 'Markierung gespeichert.'; setTimeout(()=>el('selectNotice').textContent = '', 900);
-  renderPlayerList();
-  renderGuess();
+  renderPlayerList(); renderGuess();
 
   const remaining = players.filter(pp=>pp.status !== 'done' && pp.status !== 'master');
   if(remaining.length === 0){
-    el('guessArea').style.display='none';
-    el('resultsArea').style.display='block';
-    el('postRoundNotice').style.display='block';
-    el('postRoundNotice').textContent = 'Alle Spieler haben gewählt. Bitte gebe das Handy an den Spielmacher zurück.';
+    el('guessArea').style.display='none'; el('resultsArea').style.display='block';
+    el('postRoundNotice').style.display='block'; el('postRoundNotice').textContent = 'Alle Spieler haben gewählt. Bitte gebe das Handy an den Spielmacher zurück.';
     const ctrl = el('postRoundControls'); ctrl.innerHTML = '';
-    const btn = document.createElement('button');
-    btn.textContent = 'Ergebnis anzeigen (Spielmacher)';
+    const btn = document.createElement('button'); btn.textContent = 'Ergebnis anzeigen (Spielmacher)';
     btn.addEventListener('click', ()=>{
-      // Reveal and add points once
       renderReveal(true);
-      if(!roundPointsAdded){
-        addRoundPointsToTotals();
-        roundPointsAdded = true;
-      }
+      if(!roundPointsAdded){ addRoundPointsToTotals(); roundPointsAdded = true; }
       renderScoresAndRound();
-      btn.disabled = true;
-      el('postRoundNotice').style.display = 'none';
-      el('revealCanvasWrap').scrollIntoView({behavior:'smooth', block:'center'});
+      btn.disabled = true; el('postRoundNotice').style.display = 'none'; el('revealCanvasWrap').scrollIntoView({behavior:'smooth', block:'center'});
     });
     ctrl.appendChild(btn);
   }
@@ -524,57 +463,38 @@ el('cancelBtn').addEventListener('click', ()=>{
   }
 });
 
-// Master controls
-el('showTargetBtn').addEventListener('click', ()=>{
-  masterShow = true; el('masterHint').style.display='block';
-  el('showTargetBtn').style.display='none'; el('hideTargetBtn').style.display='inline-block';
-  renderMaster(true);
-});
-el('hideTargetBtn').addEventListener('click', ()=>{
-  masterShow = false; el('masterHint').style.display='none';
-  el('hideTargetBtn').style.display='none'; el('showTargetBtn').style.display='inline-block';
-  renderMaster(false);
-});
-el('masterDoneBtn').addEventListener('click', ()=>{
-  el('masterArea').style.display='none';
-  el('guessArea').style.display='block';
-  renderGuess();
-  renderPlayerList();
-  bindGuessDrag();
-});
+// master controls
+el('showTargetBtn').addEventListener('click', ()=>{ masterShow = true; el('masterHint').style.display='block'; el('showTargetBtn').style.display='none'; el('hideTargetBtn').style.display='inline-block'; renderMaster(true); });
+el('hideTargetBtn').addEventListener('click', ()=>{ masterShow = false; el('masterHint').style.display='none'; el('hideTargetBtn').style.display='none'; el('showTargetBtn').style.display='inline-block'; renderMaster(false); });
+el('masterDoneBtn').addEventListener('click', ()=>{ el('masterArea').style.display='none'; el('guessArea').style.display='block'; renderGuess(); renderPlayerList(); bindGuessDrag(); });
 
-// Reveal & scoring
+// reveal & scoring
 function renderReveal(showTarget){
-  const wrap = el('revealCanvasWrap');
-  const w = wrap.clientWidth || Math.max(320, document.documentElement.clientWidth - 24);
-  const h = 320;
+  const wrap = el('revealCanvasWrap'); const w = wrap.clientWidth || Math.max(320, document.documentElement.clientWidth - 24); const h = 340;
   const c = document.createElement('canvas'); const dpi = window.devicePixelRatio || 1;
-  c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi);
-  c.style.width = w + 'px'; c.style.height = h + 'px';
+  c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi); c.style.width = w + 'px'; c.style.height = h + 'px';
   const ctx = c.getContext('2d'); ctx.setTransform(dpi,0,0,dpi,0,0);
   drawBase(ctx);
-  // draw all confirmed arrows (outside->in)
-  Object.entries(confirmedGuesses).forEach(([name,ang])=>{
-    const p = players.find(pp=>pp.name === name);
-    if(p) drawArrow(ctx, ang, p.color, name, false);
-  });
+  // draw all confirmed arrows
+  Object.entries(confirmedGuesses).forEach(([name,ang])=>{ const p = players.find(pp=>pp.name === name); if(p) drawArrow(ctx, ang, p.color, name, false); });
   if(showTarget) drawTargetSegmentsInside(ctx, targetAngle);
-  wrap.innerHTML = '';
-  wrap.appendChild(c);
+  wrap.innerHTML=''; wrap.appendChild(c);
 }
 
+// Compute round points using segment centers and halfDeg: assign 3/4/5/4/3 or 0
 function computeRoundPoints(){
   const roundPts = {};
-  players.forEach(p => {
-    if(p.name === players[masterIndex].name) return; // master gets no guess points
-  });
-  Object.keys(confirmedGuesses).forEach(n => roundPts[n] = 0);
-  // Ensure everyone (except master) included with 0 default
-  players.forEach(p => { if(p.name !== players[masterIndex].name && roundPts[p.name] === undefined) roundPts[p.name] = 0; });
+  const {centers, labels} = getSegmentCentersAndMeta(targetAngle);
+  // ensure everyone (except master) in table with default 0
+  players.forEach(p => { if(p.name !== players[masterIndex].name) roundPts[p.name] = 0; });
   Object.entries(confirmedGuesses).forEach(([name,ang])=>{
-    const d = Math.abs(ang - targetAngle);
-    const pts = (d === 0) ? 5 : (d === 1) ? 4 : (d === 2) ? 3 : 0;
-    roundPts[name] = pts;
+    // find first segment where |ang - center| <= halfDeg
+    let assigned = 0;
+    for(let i=0;i<centers.length;i++){
+      const c = centers[i];
+      if(Math.abs(ang - c) <= SEGMENT_HALF_DEG + 0.0001){ assigned = labels[i]; break; }
+    }
+    roundPts[name] = assigned;
   });
   return roundPts;
 }
@@ -590,33 +510,32 @@ function addRoundPointsToTotals(){
 
 // Show round points + totals after reveal
 function renderScoresAndRound(){
-  // round summary table
   const roundPts = computeRoundPoints();
   const roundDiv = el('roundSummary'); roundDiv.innerHTML = '';
   const tbl = document.createElement('table'); tbl.className = 'round-table';
-  const thead = document.createElement('thead');
-  thead.innerHTML = `<tr><th>Spieler</th><th>Rundenpunkte</th><th>Gesamtpunkte</th></tr>`;
-  tbl.appendChild(thead);
+  const thead = document.createElement('thead'); thead.innerHTML = `<tr><th>Spieler</th><th>Rundenpunkte</th><th>Gesamtpunkte</th></tr>`; tbl.appendChild(thead);
   const tbody = document.createElement('tbody');
-  // list players (excluding master in points maybe still show master with 0)
   players.forEach(p => {
-    if(p.name === players[masterIndex].name) return; // exclude master from scoring rows, optional
-    const rp = roundPts[p.name] || 0;
-    const tot = totalScores[p.name] || 0;
+    if(p.name === players[masterIndex].name) return; // optional: exclude master from scoring rows
+    const rp = roundPtsFor(p.name:=undefined) // placeholder to avoid linter confusion
+  });
+  // Build tbody properly
+  Object.keys(totalScores).forEach(name=>{
+    if(name === players[masterIndex].name) return;
+    const p = players.find(pp=>pp.name===name) || {color:'#111'};
+    const rp = (computeRoundPoints()[name] || 0);
+    const tot = totalScores[name] || 0;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="color:${p.color}"><strong>${p.name}</strong></td><td>${rp}</td><td>${tot}</td>`;
+    tr.innerHTML = `<td style="color:${p.color}"><strong>${name}</strong></td><td>${rp}</td><td>${tot}</td>`;
     tbody.appendChild(tr);
   });
-  tbl.appendChild(tbody);
-  roundDiv.appendChild(tbl);
-  // also update totals area
+  tbl.appendChild(tbody); roundDiv.appendChild(tbl);
   renderTotals();
 }
 
-// Render totals (kumulativ)
+// render totals area
 function renderTotals(){
   const node = el('scores'); node.innerHTML = '';
-  // Show totals (all players)
   const arr = Object.entries(totalScores).sort((a,b)=>b[1]-a[1]);
   arr.forEach(([name,pts])=>{
     const p = players.find(pp=>pp.name === name) || {color:'#111'};
@@ -625,23 +544,17 @@ function renderTotals(){
     div.innerHTML = `<div>${sw}${name}</div><div><strong>${pts} P</strong></div>`;
     node.appendChild(div);
   });
-  const md = document.createElement('div'); md.className='small muted'; md.style.marginTop='6px';
-  md.textContent = 'Gesamtpunkte';
-  node.appendChild(md);
+  const md = document.createElement('div'); md.className='small muted'; md.style.marginTop='6px'; md.textContent = 'Gesamtpunkte'; node.appendChild(md);
 }
 
-// Neue Runde (Nächste Runde) — behält totalScores
+// next round
 el('newRoundBtn').addEventListener('click', ()=>{
   masterIndex = (masterIndex + 1) % players.length;
   startRound();
 });
 
-// Init
-function init(){
-  renderPalette();
-  setupCanvases();
-  renderPlayersArea();
-}
+// init
+function init(){ renderPalette(); setupCanvases(); renderPlayersArea(); }
 init();
 
 </script>
