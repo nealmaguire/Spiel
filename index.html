@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Wavelength – Spiel (Fix: Ränder, 3-4-5-4-3, Punkte korrekt)</title>
+<title>Wavelength – Spiel (fix Palette)</title>
 <style>
   :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;--accent:#2563eb}
   body{margin:0;padding:0;display:flex;flex-direction:column;min-height:100vh;background:#f6f7fb;color:#111}
@@ -177,7 +177,6 @@ function renderPlayersArea(){
   });
   document.querySelectorAll('.removeBtn').forEach(b=>b.addEventListener('click', e=>{
     const i = +e.currentTarget.dataset.i; const removed = players.splice(i,1)[0];
-    // free color automatically via renderPalette
     renderPlayersArea(); renderPalette();
   }));
 }
@@ -247,9 +246,7 @@ function drawBase(ctx){
 function getSegmentCentersAndMeta(centerAngle){
   const full = SEGMENT_FULL_DEG;
   const centers = [centerAngle - 2*full, centerAngle - full, centerAngle, centerAngle + full, centerAngle + 2*full];
-  // clamp centers to 0..180 (if edge, still keep sorted left->right)
   const centersClamped = centers.map(c => Math.max(0, Math.min(180, c)));
-  // labels & colors in order left->right: 3,4,5,4,3
   const labels = [3,4,5,4,3];
   const colors = ['#16a34a','#f59e0b','#ef4444','#f59e0b','#16a34a'];
   return {centers: centersClamped, labels, colors};
@@ -289,10 +286,8 @@ function drawTargetSegmentsInside(ctx, centerAngle){
 function drawArrow(ctx, angle, color, label, highlighted=false){
   const m = metrics(ctx);
   const ang = Math.PI + (angle * Math.PI/180);
-  const outerR = m.r; // tip on outer border
-  let baseOuterR = m.r + ARROW_OUTER_OFFSET; // ideal
-
-  // clamp baseOuterR so base points stay within canvas + margin
+  const outerR = m.r;
+  let baseOuterR = m.r + ARROW_OUTER_OFFSET;
   const margin = 6;
   const tryClamp = (rCandidate) => {
     let r = rCandidate;
@@ -310,19 +305,14 @@ function drawArrow(ctx, angle, color, label, highlighted=false){
     return r;
   };
   baseOuterR = tryClamp(baseOuterR);
-
-  // tip slightly inset to avoid overlap stroke
   const tipX = m.cx + (outerR - 1) * Math.cos(ang), tipY = m.cy + (outerR - 1) * Math.sin(ang);
   const leftX  = m.cx + baseOuterR * Math.cos(ang + ARROW_BASE_ANGLE_WIDTH);
   const leftY  = m.cy + baseOuterR * Math.sin(ang + ARROW_BASE_ANGLE_WIDTH);
   const rightX = m.cx + baseOuterR * Math.cos(ang - ARROW_BASE_ANGLE_WIDTH);
   const rightY = m.cy + baseOuterR * Math.sin(ang - ARROW_BASE_ANGLE_WIDTH);
-
   ctx.beginPath(); ctx.moveTo(leftX,leftY); ctx.lineTo(tipX,tipY); ctx.lineTo(rightX,rightY); ctx.closePath();
   ctx.fillStyle = rgba(color,1); ctx.fill();
   if(highlighted){ ctx.lineWidth=2; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.stroke(); }
-
-  // label aside - clamp inside canvas
   const labelR = baseOuterR + 8;
   let lx = m.cx + labelR * Math.cos(ang);
   let ly = m.cy + labelR * Math.sin(ang);
@@ -331,7 +321,7 @@ function drawArrow(ctx, angle, color, label, highlighted=false){
   ctx.fillText(label, labelX, ly + 4);
 }
 
-// render master view
+// render master
 let masterShow = false;
 function renderMaster(force=false){
   drawBase(mctx);
@@ -345,7 +335,7 @@ function renderMaster(force=false){
   }
 }
 
-// render guess canvas (do not draw confirmed players)
+// render guess
 function renderGuess(){
   drawBase(gctx);
   if(currentPicker && tempAngle !== null){
@@ -379,7 +369,7 @@ function renderPlayerList(){
   });
 }
 
-// robust canvas->angle
+// canvas->angle
 function canvasToAngle(clientX, clientY, ctx){
   const rect = ctx.canvas.getBoundingClientRect();
   const x = clientX - rect.left; const y = clientY - rect.top;
@@ -427,7 +417,7 @@ function bindGuessDrag(){
   });
 }
 
-// Confirm / Cancel
+// confirm / cancel
 el('confirmBtn').addEventListener('click', ()=>{
   if(!currentPicker){ alert('Wähle zuerst deinen Namen'); return; }
   if(tempAngle === null){ alert('Ziehe zuerst den Pfeil'); return; }
@@ -475,20 +465,17 @@ function renderReveal(showTarget){
   c.width = Math.floor(w * dpi); c.height = Math.floor(h * dpi); c.style.width = w + 'px'; c.style.height = h + 'px';
   const ctx = c.getContext('2d'); ctx.setTransform(dpi,0,0,dpi,0,0);
   drawBase(ctx);
-  // draw all confirmed arrows
   Object.entries(confirmedGuesses).forEach(([name,ang])=>{ const p = players.find(pp=>pp.name === name); if(p) drawArrow(ctx, ang, p.color, name, false); });
   if(showTarget) drawTargetSegmentsInside(ctx, targetAngle);
   wrap.innerHTML=''; wrap.appendChild(c);
 }
 
-// Compute round points using segment centers and halfDeg: assign 3/4/5/4/3 or 0
+// compute round points
 function computeRoundPoints(){
   const roundPts = {};
   const {centers, labels} = getSegmentCentersAndMeta(targetAngle);
-  // ensure everyone (except master) in table with default 0
   players.forEach(p => { if(p.name !== players[masterIndex].name) roundPts[p.name] = 0; });
   Object.entries(confirmedGuesses).forEach(([name,ang])=>{
-    // find first segment where |ang - center| <= halfDeg
     let assigned = 0;
     for(let i=0;i<centers.length;i++){
       const c = centers[i];
@@ -517,16 +504,10 @@ function renderScoresAndRound(){
   const tbody = document.createElement('tbody');
   players.forEach(p => {
     if(p.name === players[masterIndex].name) return; // optional: exclude master from scoring rows
-    const rp = roundPtsFor(p.name:=undefined) // placeholder to avoid linter confusion
-  });
-  // Build tbody properly
-  Object.keys(totalScores).forEach(name=>{
-    if(name === players[masterIndex].name) return;
-    const p = players.find(pp=>pp.name===name) || {color:'#111'};
-    const rp = (computeRoundPoints()[name] || 0);
-    const tot = totalScores[name] || 0;
+    const rp = roundPts[p.name] || 0;
+    const tot = totalScores[p.name] || 0;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="color:${p.color}"><strong>${name}</strong></td><td>${rp}</td><td>${tot}</td>`;
+    tr.innerHTML = `<td style="color:${p.color}"><strong>${p.name}</strong></td><td>${rp}</td><td>${tot}</td>`;
     tbody.appendChild(tr);
   });
   tbl.appendChild(tbody); roundDiv.appendChild(tbl);
